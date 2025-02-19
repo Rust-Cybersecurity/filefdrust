@@ -8,7 +8,7 @@ use std::ffi::CString;
 fn main() -> io::Result<()> {
 
     let uid = Uid::current().as_raw() as u32;
-    //println!("Usuario: {}", uid);
+    println!("Usuario: {:?}", uid);
 
 
     let path = CString::new("/tmp/notes").expect("CString conversion failed");
