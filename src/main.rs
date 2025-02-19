@@ -1,38 +1,72 @@
-use nix::unistd::{Uid, write};
-use std::io::{self, Read};
-use std::os::unix::io::AsRawFd;
-use std::fs::{File, OpenOptions};
+use nix::unistd::Uid;
+use nix::fcntl::{open, OFlag};
+use nix::sys::stat::Mode;
+use nix::unistd::{close, write};
+use std::io::{self, Write};
+use std::ffi::CString;
 
 fn main() -> io::Result<()> {
-    // Get the current user's UID
-    let uid = Uid::current().as_raw();
 
-    // Convert UID to 4 bytes in little-endian format
-    let uid_bytes: [u8; 4] = uid.to_le_bytes();
+    let uid = Uid::current().as_raw() as u32;
+    //println!("Usuario: {}", uid);
 
-    // Open or create the file in /tmp/notes using file descriptors
-    let file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("/tmp/notes")?;
 
-    let fd = file.as_raw_fd();
+    let path = CString::new("/tmp/notes").expect("CString conversion failed");
+    let path_str = path.as_c_str();
 
-    // Write UID to file using file descriptor
-    nix::unistd::write(fd, &uid_bytes)?;
 
-    // Write a newline after UID
-    nix::unistd::write(fd, b"\n")?;
+    let fd = match open(
+        path_str,
+        OFlag::O_CREAT | OFlag::O_APPEND | OFlag::O_WRONLY,
+        Mode::S_IRUSR | Mode::S_IWUSR,
+    ) {
+        Ok(fd) => fd,
+        Err(e) => {
+            eprintln!("Failed to open file: {}", e);
+            return Err(io::Error::new(io::ErrorKind::Other, "Failed to open file"));
+        }
+    };
 
-    // Read user input
+
+    match write(fd, &uid.to_ne_bytes()) {
+        Ok(_) => {},
+        Err(e) => {
+            eprintln!("Failed to write UID: {}", e);
+            close(fd).ok();
+            return Err(io::Error::new(io::ErrorKind::Other, "Failed to write UID"));
+        }
+    }
+
+
+    match write(fd, b"\n") {
+        Ok(_) => {},
+        Err(e) => {
+            eprintln!("Failed to write newline: {}", e);
+            close(fd).ok();
+            return Err(io::Error::new(io::ErrorKind::Other, "Failed to write newline"));
+        }
+    }
+
+
     println!("Enter your message:");
     let mut input = String::new();
     io::stdin().read_line(&mut input)?;
 
-    // Write the user's message to the file using file descriptor
-    nix::unistd::write(fd, input.as_bytes())?;
 
-    println!("Your message has been written to /tmp/notes.");
+    match write(fd, input.as_bytes()) {
+        Ok(_) => println!("Your message has been written to /tmp/notes."),
+        Err(e) => {
+            eprintln!("Failed to write message: {}", e);
+            close(fd).ok();
+            return Err(io::Error::new(io::ErrorKind::Other, "Failed to write message"));
+        }
+    }
+
+
+    if let Err(e) = close(fd) {
+        eprintln!("Failed to close file: {}", e);
+        return Err(io::Error::new(io::ErrorKind::Other, "Failed to close file"));
+    }
 
     Ok(())
 }
